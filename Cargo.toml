@@ -1,0 +1,16 @@
+[package]
+name = "little-computer-3-rs"
+version = "0.1.0"
+authors = ["Alastair Gould <alastair.gould@gmail.com>"]
+edition = "2018"
+
+[profile.release]
+opt-level = 3
+lto = true
+
+[dependencies]
+bitflags = "1.0.4"
+nom = "4.1.1"
+num-derive = "0.2.3"
+num = "0.2.0"
+num-traits = "0.2.6"
