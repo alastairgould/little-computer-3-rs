@@ -2,6 +2,7 @@ pub mod instructions;
 mod registers;
 
 use std::io::Read;
+use self::instructions::BinaryInstruction;
 use self::instructions::Instruction;
 use self::instructions::Address;
 use self::instructions::TrapCode;
@@ -38,7 +39,7 @@ impl Cpu {
     fn next_binary_instruction(&mut self) -> instructions::BinaryInstruction {
         let program_counter = self.next_program_counter();
         let next_instruction = self.memory[program_counter as usize];
-        next_instruction
+        BinaryInstruction::from(next_instruction)
     }
 
     fn next_program_counter(&mut self) -> u16 {
