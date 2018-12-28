@@ -1,10 +1,98 @@
 use super::registers::Register;
 use num::FromPrimitive;
+use std::ops::{Add, Index, IndexMut};
 
-pub struct Address(u16);
+#[derive(Debug, Copy, Clone)]
+pub struct Address(usize);
+
+#[derive(Debug, Copy, Clone)]
 pub struct BinaryInstruction(u16);
+
+#[derive(Debug, Copy, Clone)]
 pub struct MemoryOffset(i16);
+
+#[derive(Debug, Copy, Clone)]
+pub struct ProgramCounter(u16);
+
+#[derive(Debug, Copy, Clone)]
 pub struct ProgramCounterOffset(i16);
+
+impl From<i16> for ProgramCounterOffset {
+    fn from(value: i16) -> ProgramCounterOffset {
+        let program_counter_value = value + 1;
+        ProgramCounterOffset(program_counter_value)
+    }
+}
+
+impl From<u16> for Address {
+    fn from(value: u16) -> Self {
+        Address(value as usize)
+    }
+}
+
+impl From<Address> for usize {
+    fn from(value: Address) -> Self {
+        value.0 as usize
+    }
+}
+
+impl Add<MemoryOffset> for Address {
+    type Output = Address;
+
+    fn add(self, offset: MemoryOffset) -> Address {
+        let address_value = self.0 as i32;
+        let offset_value = offset.0 as i32;
+
+        let new_address_value = address_value + offset_value;
+        Address(new_address_value as usize)
+    }
+}
+
+impl From<ProgramCounter> for Address {
+    fn from(value: ProgramCounter) -> Self {
+        Address(value.0 as usize)
+    }
+}
+
+impl Add<ProgramCounterOffset> for ProgramCounter {
+    type Output = ProgramCounter;
+
+    fn add(self, offset: ProgramCounterOffset) -> ProgramCounter {
+        let program_counter_value = self.0 as i32;
+        let program_counter_offset_value = offset.0 as i32;
+        let new_program_counter_value = program_counter_value + program_counter_offset_value;
+
+        ProgramCounter(new_program_counter_value as u16)
+    }
+}
+
+impl From<u16> for ProgramCounter {
+    fn from(value: u16) -> ProgramCounter {
+        ProgramCounter(value)
+    }
+}
+
+impl From<ProgramCounter> for u16 {
+    fn from(value: ProgramCounter) -> u16 {
+        value.0
+    }
+}
+
+impl Index<Address> for Vec<u16> {
+    type Output = u16;
+
+    fn index(&self, address: Address) -> &u16 {
+        let index = address.0 as usize;
+        &self[index]
+    }
+}
+
+impl IndexMut<Address> for Vec<u16> {
+    fn index_mut(&mut self, address: Address) -> &mut u16 {
+        let index = address.0 as usize;
+        &mut self[index]
+    }
+}
 
 impl BinaryInstruction {
     fn op_code(self) -> u16 {
@@ -16,6 +104,12 @@ impl BinaryInstruction {
 impl From<u16> for BinaryInstruction {
     fn from(binary_instruction: u16) -> Self {
         BinaryInstruction(binary_instruction)
+    }
+}
+
+impl From<BinaryInstruction> for u16 {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        binary_instruction.0
     }
 }
 
@@ -48,7 +142,6 @@ pub enum Instruction {
 
 impl From<BinaryInstruction> for Instruction {
     fn from(binary_instruction: BinaryInstruction) -> Self {
-
         match binary_instruction.op_code() {
             0b0000 => Instruction::OpBr(binary_instruction.into()),
             0b0001 => Instruction::OpAdd(binary_instruction.into()),
@@ -83,7 +176,9 @@ pub enum TrapCode {
 
 impl From<BinaryInstruction> for TrapCode {
     fn from(binary_instruction: BinaryInstruction) -> Self {
-        let trap_code_byte = binary_instruction & 0b11111111;
+        let binary = u16::from(binary_instruction);
+
+        let trap_code_byte = binary & 0b11111111;
         let trap_code = TrapCode::from_u16(trap_code_byte);
 
         match trap_code {
@@ -100,12 +195,14 @@ pub enum OpAdd {
 
 impl From<BinaryInstruction> for OpAdd {
     fn from(binary_instruction: BinaryInstruction) -> Self {
-        let immediate_mode = ((binary_instruction >> 5) & 0b0001) != 0;
+        let binary = u16::from(binary_instruction);
+
+        let immediate_mode = ((binary >> 5) & 0b0001) != 0;
 
         match immediate_mode {
             true => OpAdd::ImmediateMode(OpAddImmediate::from(binary_instruction)),
             false => OpAdd::NormalMode(OpAddNormal::from(binary_instruction)),
-        }   
+        }
     }
 }
 
@@ -115,11 +212,13 @@ pub struct OpAddNormal {
     pub second_value_register: Register,
 }
 
-impl From<u16> for OpAddNormal {
+impl From<BinaryInstruction> for OpAddNormal {
     fn from(binary_instruction: BinaryInstruction) -> Self {
-        let destination_register = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let first_value_register = Register::from_u16((binary_instruction >> 6) & 0b0111).unwrap();
-        let second_value_register = Register::from_u16(binary_instruction & 0b0111).unwrap();
+        let binary = u16::from(binary_instruction);
+
+        let destination_register = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let first_value_register = Register::from_u16((binary >> 6) & 0b0111).unwrap();
+        let second_value_register = Register::from_u16(binary & 0b0111).unwrap();
 
         OpAddNormal {
             destination_register: destination_register,
@@ -137,9 +236,11 @@ pub struct OpAddImmediate {
 
 impl From<BinaryInstruction> for OpAddImmediate {
     fn from(binary_instruction: BinaryInstruction) -> Self {
-        let destination_register = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let first_value_register = Register::from_u16((binary_instruction >> 6) & 0b0111).unwrap();
-        let second_value = sign_extend(binary_instruction & 0b00011111, 5);
+        let binary = u16::from(binary_instruction);
+
+        let destination_register = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let first_value_register = Register::from_u16((binary >> 6) & 0b0111).unwrap();
+        let second_value = sign_extend(binary & 0b00011111, 5);
 
         OpAddImmediate {
             destination_register: destination_register,
@@ -156,7 +257,9 @@ pub enum OpAnd {
 
 impl From<BinaryInstruction> for OpAnd {
     fn from(binary_instruction: BinaryInstruction) -> Self {
-        let immediate_mode = ((binary_instruction >> 5) & 0b0001) != 0;
+        let binary = u16::from(binary_instruction);
+
+        let immediate_mode = ((binary >> 5) & 0b0001) != 0;
 
         match immediate_mode {
             true => OpAnd::ImmediateMode(OpAndImmediate::from(binary_instruction)),
@@ -173,9 +276,11 @@ pub struct OpAndNormal {
 
 impl From<BinaryInstruction> for OpAndNormal {
     fn from(binary_instruction: BinaryInstruction) -> Self {
-        let destination_register = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let first_value_register = Register::from_u16((binary_instruction >> 6) & 0b0111).unwrap();
-        let second_value_register = Register::from_u16(binary_instruction & 0b0111).unwrap();
+        let binary = u16::from(binary_instruction);
+
+        let destination_register = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let first_value_register = Register::from_u16((binary >> 6) & 0b0111).unwrap();
+        let second_value_register = Register::from_u16(binary & 0b0111).unwrap();
 
         OpAndNormal {
             destination_register: destination_register,
@@ -191,11 +296,13 @@ pub struct OpAndImmediate {
     pub second_value: u16,
 }
 
-impl From<u16> for OpAndImmediate {
+impl From<BinaryInstruction> for OpAndImmediate {
     fn from(binary_instruction: BinaryInstruction) -> Self {
-        let destination_register = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let first_value_register = Register::from_u16((binary_instruction >> 6) & 0b0111).unwrap();
-        let second_value = sign_extend(binary_instruction & 0b00011111, 5);
+        let binary = u16::from(binary_instruction);
+
+        let destination_register = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let first_value_register = Register::from_u16((binary >> 6) & 0b0111).unwrap();
+        let second_value = sign_extend(binary & 0b00011111, 5);
 
         OpAndImmediate {
             destination_register: destination_register,
@@ -210,10 +317,12 @@ pub struct OpLdi {
     pub program_counter_offset: ProgramCounterOffset,
 }
 
-impl From<u16> for OpLdi {
-    fn from(binary_instruction: u16) -> Self {
-        let destination_register = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let program_counter_offset = sign_extend(binary_instruction & 0b000111111111, 9);
+impl From<BinaryInstruction> for OpLdi {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let destination_register = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let program_counter_offset = sign_extend(binary & 0b000111111111, 9);
 
         OpLdi {
             destination_register: destination_register,
@@ -227,10 +336,12 @@ pub struct OpLoad {
     pub program_counter_offset: ProgramCounterOffset,
 }
 
-impl From<u16> for OpLoad {
-    fn from(binary_instruction: u16) -> Self {
-        let destination_register = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let program_counter_offset = sign_extend(binary_instruction & 0b000111111111, 9);
+impl From<BinaryInstruction> for OpLoad {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let destination_register = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let program_counter_offset = sign_extend(binary & 0b000111111111, 9);
 
         OpLoad {
             destination_register: destination_register,
@@ -244,10 +355,12 @@ pub struct OpBr {
     pub condition_flag: ConditionFlag,
 }
 
-impl From<u16> for OpBr {
-    fn from(binary_instruction: u16) -> Self {
-        let program_counter_offset = sign_extend((binary_instruction) & 0b000111111111, 9);
-        let condition_flag = ConditionFlag::from_bits_truncate((binary_instruction >> 9) & 0b0111);
+impl From<BinaryInstruction> for OpBr {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let program_counter_offset = sign_extend((binary) & 0b000111111111, 9);
+        let condition_flag = ConditionFlag::from_bits_truncate((binary >> 9) & 0b0111);
 
         OpBr {
             program_counter_offset: ProgramCounterOffset(convert_to_signed(program_counter_offset)),
@@ -261,9 +374,11 @@ pub enum OpJsr {
     Register(OpJsrRegister),
 }
 
-impl From<u16> for OpJsr {
-    fn from(binary_instruction: u16) -> Self {
-        let offset_mode = ((binary_instruction >> 11) & 1) != 0;
+impl From<BinaryInstruction> for OpJsr {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let offset_mode = ((binary >> 11) & 1) != 0;
 
         match offset_mode {
             true => OpJsr::Offset(OpJsrOffset::from(binary_instruction)),
@@ -276,9 +391,11 @@ pub struct OpJsrOffset {
     pub program_counter_offset: ProgramCounterOffset,
 }
 
-impl From<u16> for OpJsrOffset {
-    fn from(binary_instruction: u16) -> Self {
-        let program_counter_offset = sign_extend((binary_instruction) & 0b011111111111, 11);
+impl From<BinaryInstruction> for OpJsrOffset {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let program_counter_offset = sign_extend((binary) & 0b011111111111, 11);
 
         OpJsrOffset {
             program_counter_offset: ProgramCounterOffset(convert_to_signed(program_counter_offset)),
@@ -290,9 +407,11 @@ pub struct OpJsrRegister {
     pub jump_to_contents_of_register: Register,
 }
 
-impl From<u16> for OpJsrRegister {
-    fn from(binary_instruction: u16) -> Self {
-        let base_register = Register::from_u16((binary_instruction >> 6) & 0b0111).unwrap();
+impl From<BinaryInstruction> for OpJsrRegister {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let base_register = Register::from_u16((binary >> 6) & 0b0111).unwrap();
 
         OpJsrRegister {
             jump_to_contents_of_register: base_register,
@@ -305,10 +424,12 @@ pub struct OpNot {
     pub first_value_register: Register,
 }
 
-impl From<u16> for OpNot {
-    fn from(binary_instruction: u16) -> Self {
-        let destination_register = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let first_value_register = Register::from_u16((binary_instruction >> 6) & 0b0111).unwrap();
+impl From<BinaryInstruction> for OpNot {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let destination_register = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let first_value_register = Register::from_u16((binary >> 6) & 0b0111).unwrap();
 
         OpNot {
             destination_register: destination_register,
@@ -321,9 +442,11 @@ pub struct OpJmp {
     pub jump_to_contents_of_register: Register,
 }
 
-impl From<u16> for OpJmp {
-    fn from(binary_instruction: u16) -> Self {
-        let base_register = Register::from_u16((binary_instruction >> 6) & 0b0111).unwrap();
+impl From<BinaryInstruction> for OpJmp {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let base_register = Register::from_u16((binary >> 6) & 0b0111).unwrap();
 
         OpJmp {
             jump_to_contents_of_register: base_register,
@@ -337,11 +460,13 @@ pub struct OpLdr {
     pub offset: MemoryOffset,
 }
 
-impl From<u16> for OpLdr {
-    fn from(binary_instruction: u16) -> Self {
-        let destination_register = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let base_register = Register::from_u16((binary_instruction >> 6) & 0b0111).unwrap();
-        let offset = sign_extend(binary_instruction & 0b00111111, 6);
+impl From<BinaryInstruction> for OpLdr {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let destination_register = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let base_register = Register::from_u16((binary >> 6) & 0b0111).unwrap();
+        let offset = sign_extend(binary & 0b00111111, 6);
 
         OpLdr {
             destination_register: destination_register,
@@ -356,10 +481,12 @@ pub struct OpLea {
     pub program_counter_offset: ProgramCounterOffset,
 }
 
-impl From<u16> for OpLea {
-    fn from(binary_instruction: u16) -> Self {
-        let destination_register = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let program_counter_offset = sign_extend(binary_instruction & 0b000111111111, 9);
+impl From<BinaryInstruction> for OpLea {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let destination_register = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let program_counter_offset = sign_extend(binary & 0b000111111111, 9);
 
         OpLea {
             destination_register: destination_register,
@@ -373,10 +500,12 @@ pub struct OpSt {
     pub program_counter_offset: ProgramCounterOffset,
 }
 
-impl From<u16> for OpSt {
-    fn from(binary_instruction: u16) -> Self {
-        let registry_to_store = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let program_counter_offset = sign_extend(binary_instruction & 0b000111111111, 9);
+impl From<BinaryInstruction> for OpSt {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let registry_to_store = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let program_counter_offset = sign_extend(binary & 0b000111111111, 9);
 
         OpSt {
             registry_to_store: registry_to_store,
@@ -391,11 +520,13 @@ pub struct OpStr {
     pub offset: MemoryOffset,
 }
 
-impl From<u16> for OpStr {
-    fn from(binary_instruction: u16) -> Self {
-        let registry_to_store = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let base_register = Register::from_u16((binary_instruction >> 6) & 0b0111).unwrap();
-        let offset = sign_extend(binary_instruction & 0b00111111, 6);
+impl From<BinaryInstruction> for OpStr {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let registry_to_store = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let base_register = Register::from_u16((binary >> 6) & 0b0111).unwrap();
+        let offset = sign_extend(binary & 0b00111111, 6);
 
         OpStr {
             registry_to_store: registry_to_store,
@@ -410,29 +541,26 @@ pub struct OpSti {
     pub program_counter_offset: ProgramCounterOffset,
 }
 
-impl From<u16> for OpSti {
-    fn from(binary_instruction: u16) -> Self {
-        let registry_to_store = Register::from_u16((binary_instruction >> 9) & 0b0111).unwrap();
-        let program_counter_offset = sign_extend(binary_instruction & 0b000111111111, 9);
+impl From<BinaryInstruction> for OpSti {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        let binary = u16::from(binary_instruction);
+
+        let registry_to_store = Register::from_u16((binary >> 9) & 0b0111).unwrap();
+        let program_counter_offset = sign_extend(binary & 0b000111111111, 9);
 
         OpSti {
             registry_to_store: registry_to_store,
-            program_counter_offset: ProgramCounterOffset(convert_to_signed(program_counter_offset))
-            ,
+            program_counter_offset: ProgramCounterOffset(convert_to_signed(program_counter_offset)),
         }
     }
 }
 
 pub fn convert_to_signed(value: u16) -> i16 {
-    unsafe {
-        std::mem::transmute::<u16, i16>(value)
-    }
+    unsafe { std::mem::transmute::<u16, i16>(value) }
 }
 
 pub fn convert_to_unsigned(value: i16) -> u16 {
-    unsafe {
-        std::mem::transmute::<i16, u16>(value)
-    }
+    unsafe { std::mem::transmute::<i16, u16>(value) }
 }
 
 fn sign_extend(x: u16, bit_count: u16) -> u16 {
