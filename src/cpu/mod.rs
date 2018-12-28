@@ -134,8 +134,8 @@ impl Cpu {
     fn load(mut self, instruction: instructions::OpLoad) -> Self {
         let destination_register = instruction.destination_register;
         let program_counter_offset = instruction.program_counter_offset;
-        let memory_address = self.program_counter() + program_counter_offset;
-        let memory_address_contents = self.read_memory(memory_address.into());
+        let memory_address = Address::from(self.program_counter() + program_counter_offset);
+        let memory_address_contents = self.read_memory(memory_address);
 
         self.registers[destination_register] = memory_address_contents;
         self.set_condition_flag(memory_address_contents)
@@ -144,9 +144,9 @@ impl Cpu {
     fn store(mut self, instruction: instructions::OpSt) -> Self {
         let registry_contents = self.registers[instruction.registry_to_store];
         let program_counter_offset = instruction.program_counter_offset;
-        let memory_location = self.program_counter() + program_counter_offset;
+        let memory_location = Address::from(self.program_counter() + program_counter_offset);
 
-        self.set_memory(memory_location.into(), registry_contents);
+        self.set_memory(memory_location, registry_contents);
         self
     }
 
@@ -228,7 +228,9 @@ impl Cpu {
 
     fn not(mut self, instruction: instructions::OpNot) -> Self {
         let first_value = self.registers[instruction.first_value_register];
+
         let result = !first_value;
+
         self.registers[instruction.destination_register] = result;
         self.set_condition_flag(result)
     }
@@ -236,10 +238,11 @@ impl Cpu {
     fn load_indirect(mut self, instruction: instructions::OpLdi) -> Self {
         let program_counter = self.program_counter();
         let offset = instruction.program_counter_offset;
-
         let memory_location = Address::from(program_counter + offset);
-        let final_memory_location = self.read_memory(memory_location);
-        let final_value = self.read_memory(Address::from(final_memory_location));
+
+        let final_memory_location = Address::from(self.read_memory(memory_location));
+        let final_value = self.read_memory(final_memory_location);
+
         self.registers[instruction.destination_register] = final_value;
         self.set_condition_flag(final_value)
     }
