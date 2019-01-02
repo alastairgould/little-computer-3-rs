@@ -1,11 +1,14 @@
 pub mod instructions;
 mod registers;
 
-use std::io::Read;
-use self::instructions::Instruction;
 use self::instructions::Address;
-use self::instructions::TrapCode;
+use self::instructions::BinaryInstruction;
 use self::instructions::ConditionFlag;
+use self::instructions::Instruction;
+use self::instructions::ProgramCounter;
+use self::instructions::ProgramCounterOffset;
+use self::instructions::TrapCode;
+use std::io::Read;
 
 pub struct Cpu {
     memory: Vec<u16>,
@@ -19,7 +22,7 @@ impl Cpu {
             registers: vec![0; registers::Register::RCount as usize],
         };
 
-        cpu.registers[registers::Register::RPc as usize] = 12288;
+        cpu.registers[registers::Register::RPc] = 12288;
         cpu
     }
 
@@ -37,13 +40,14 @@ impl Cpu {
 
     fn next_binary_instruction(&mut self) -> instructions::BinaryInstruction {
         let program_counter = self.next_program_counter();
-        let next_instruction = self.memory[program_counter as usize];
-        next_instruction
+        let next_instruction = self.memory[Address::from(program_counter)];
+        BinaryInstruction::from(next_instruction)
     }
 
-    fn next_program_counter(&mut self) -> u16 {
-        let program_counter = self.registers[registers::Register::RPc as usize];
-        self.registers[registers::Register::RPc as usize] = program_counter + 1;
+    fn next_program_counter(&mut self) -> ProgramCounter {
+        let program_counter = self.program_counter();
+        let new_program_counter = program_counter + ProgramCounterOffset::from(1);
+        self.registers[registers::Register::RPc] = new_program_counter.into();
         program_counter
     }
 
@@ -69,23 +73,30 @@ impl Cpu {
     }
 
     fn read_memory(&self, memory_address: Address) -> u16 {
-        self.memory[memory_address as usize]
+        self.memory[memory_address]
     }
-    
+
     fn set_memory(&mut self, memory_address: Address, value: u16) {
-        self.memory[memory_address as usize] = value 
+        self.memory[memory_address] = value
+    }
+
+    fn set_program_counter(&mut self, program_counter: ProgramCounter) {
+        self.registers[registers::Register::RPc] = u16::from(program_counter)
+    }
+
+    fn program_counter(&self) -> ProgramCounter {
+        self.registers[registers::Register::RPc].into()
     }
 
     fn branch(mut self, instruction: instructions::OpBr) -> Self {
         let program_counter_offset = instruction.program_counter_offset;
-        let condition_bits = self.registers[registers::Register::RCond as usize];
+        let condition_bits = self.registers[registers::Register::RCond];
         let condition_register = instructions::ConditionFlag::from_bits_truncate(condition_bits);
         let should_branch = condition_register.intersects(instruction.condition_flag);
 
         if should_branch {
-            let program_counter = self.registers[registers::Register::RPc as usize];
-            let new_program_counter = program_counter as i16 + program_counter_offset;
-            self.registers[registers::Register::RPc as usize] = new_program_counter as u16;
+            let new_program_counter = self.program_counter() + program_counter_offset;
+            self.set_program_counter(new_program_counter);
         }
 
         self
@@ -99,43 +110,43 @@ impl Cpu {
     }
 
     fn add_normal(mut self, instruction: instructions::OpAddNormal) -> Self {
-        let first_value_bits = self.registers[instruction.first_value_register as usize];
+        let first_value_bits = self.registers[instruction.first_value_register];
         let first_value = instructions::convert_to_signed(first_value_bits);
-        let second_value = instructions::convert_to_signed(self.registers[instruction.second_value_register as usize]);
+        let second_value =
+            instructions::convert_to_signed(self.registers[instruction.second_value_register]);
         let value = first_value.wrapping_add(second_value);
         let unsigned_value = instructions::convert_to_unsigned(value);
 
-        self.registers[instruction.destination_register as usize] = unsigned_value;
+        self.registers[instruction.destination_register] = unsigned_value;
         self.set_condition_flag(unsigned_value)
     }
 
     fn add_immediate(mut self, instruction: instructions::OpAddImmediate) -> Self {
-        let first_value = instructions::convert_to_signed(self.registers[instruction.first_value_register as usize]);
+        let first_value =
+            instructions::convert_to_signed(self.registers[instruction.first_value_register]);
         let value = first_value.wrapping_add(instruction.second_value);
         let unsigned_value = instructions::convert_to_unsigned(value);
 
-        self.registers[instruction.destination_register as usize] = unsigned_value;
+        self.registers[instruction.destination_register] = unsigned_value;
         self.set_condition_flag(unsigned_value)
     }
 
     fn load(mut self, instruction: instructions::OpLoad) -> Self {
-        let destination_register = instruction.destination_register as usize;
-        let program_counter = self.registers[registers::Register::RPc as usize];
+        let destination_register = instruction.destination_register;
         let program_counter_offset = instruction.program_counter_offset;
-        let memory_address = program_counter as i16 + program_counter_offset;
-        let memory_address_contents = self.read_memory(memory_address as u16);
+        let memory_address = Address::from(self.program_counter() + program_counter_offset);
+        let memory_address_contents = self.read_memory(memory_address);
 
-        self.registers[destination_register as usize] = memory_address_contents;
+        self.registers[destination_register] = memory_address_contents;
         self.set_condition_flag(memory_address_contents)
     }
 
     fn store(mut self, instruction: instructions::OpSt) -> Self {
-        let registry_contents = self.registers[instruction.registry_to_store as usize];
-        let program_counter = self.registers[registers::Register::RPc as usize];
+        let registry_contents = self.registers[instruction.registry_to_store];
         let program_counter_offset = instruction.program_counter_offset;
-        let memory_location = program_counter as i16 + program_counter_offset;
+        let memory_location = Address::from(self.program_counter() + program_counter_offset);
 
-        self.set_memory(memory_location as u16, registry_contents);
+        self.set_memory(memory_location, registry_contents);
         self
     }
 
@@ -147,24 +158,24 @@ impl Cpu {
     }
 
     fn jump_register_offset(mut self, instruction: instructions::OpJsrOffset) -> Self {
-        let program_counter = self.registers[registers::Register::RPc as usize];
-        self.registers[registers::Register::R7 as usize] = program_counter;
+        let program_counter = self.program_counter();
+        self.registers[registers::Register::R7] = u16::from(program_counter);
 
         let program_counter_offset = instruction.program_counter_offset;
-        let new_program_counter = program_counter as i16 + program_counter_offset;
+        let new_program_counter = program_counter + program_counter_offset;
 
-        self.registers[registers::Register::RPc as usize] = new_program_counter as u16;
+        self.set_program_counter(new_program_counter);
         self
     }
 
     fn jump_register_register(mut self, instruction: instructions::OpJsrRegister) -> Self {
-        let program_counter = self.registers[registers::Register::RPc as usize];
-        self.registers[registers::Register::R7 as usize] = program_counter;
+        let program_counter = self.registers[registers::Register::RPc];
+        self.registers[registers::Register::R7] = program_counter;
 
-        let jump_register = instruction.jump_to_contents_of_register as usize;
+        let jump_register = instruction.jump_to_contents_of_register;
         let jump_register_contents = self.registers[jump_register];
 
-        self.registers[registers::Register::RPc as usize] = jump_register_contents;
+        self.registers[registers::Register::RPc] = jump_register_contents;
         self
     }
 
@@ -176,89 +187,92 @@ impl Cpu {
     }
 
     fn and_normal(mut self, instruction: instructions::OpAndNormal) -> Self {
-        let first_value = self.registers[instruction.first_value_register as usize];
-        let second_value = self.registers[instruction.second_value_register as usize];
+        let first_value = self.registers[instruction.first_value_register];
+        let second_value = self.registers[instruction.second_value_register];
 
         let result = first_value & second_value;
 
-        self.registers[instruction.destination_register as usize] = result;
+        self.registers[instruction.destination_register] = result;
         self.set_condition_flag(result)
     }
 
     fn and_immediate(mut self, instruction: instructions::OpAndImmediate) -> Self {
-        let first_value = self.registers[instruction.first_value_register as usize];
+        let first_value = self.registers[instruction.first_value_register];
         let second_value = instruction.second_value;
 
         let result = first_value & second_value;
 
-        self.registers[instruction.destination_register as usize] = result;
+        self.registers[instruction.destination_register] = result;
         self.set_condition_flag(result)
     }
 
     fn load_register(mut self, instruction: instructions::OpLdr) -> Self {
-        let destination_register = instruction.destination_register as usize;
-        let base_registry_content = self.registers[instruction.base_registry as usize];
-        let memory_address = instructions::convert_to_signed(base_registry_content) + instruction.offset;
+        let destination_register = instruction.destination_register;
+        let base_registry_content = self.registers[instruction.base_registry];
+        let memory_address = Address::from(base_registry_content) + instruction.offset;
 
-        let value = self.read_memory(memory_address as u16);
+        let value = self.read_memory(memory_address);
 
         self.registers[destination_register] = value;
         self.set_condition_flag(value)
     }
 
     fn store_register(mut self, instruction: instructions::OpStr) -> Self {
-        let registry_contents = self.registers[instruction.registry_to_store as usize];
-        let base_registry_contents = instructions::convert_to_signed(self.registers[instruction.base_registry as usize]);
+        let registry_contents = self.registers[instruction.registry_to_store];
+        let base_registry_contents = Address::from(self.registers[instruction.base_registry]);
         let memory_address = base_registry_contents + instruction.offset;
 
-        self.set_memory(memory_address as u16, registry_contents);
+        self.set_memory(memory_address, registry_contents);
         self
     }
 
     fn not(mut self, instruction: instructions::OpNot) -> Self {
-        let first_value = self.registers[instruction.first_value_register as usize];
+        let first_value = self.registers[instruction.first_value_register];
+
         let result = !first_value;
-        self.registers[instruction.destination_register as usize] = result;
+
+        self.registers[instruction.destination_register] = result;
         self.set_condition_flag(result)
     }
 
     fn load_indirect(mut self, instruction: instructions::OpLdi) -> Self {
-        let program_counter = self.registers[registers::Register::RPc as usize] as i16;
+        let program_counter = self.program_counter();
         let offset = instruction.program_counter_offset;
+        let memory_location = Address::from(program_counter + offset);
 
-        let memory_location = program_counter + offset;
-        let final_memory_location = self.read_memory(memory_location as u16) as u16;
+        let final_memory_location = Address::from(self.read_memory(memory_location));
         let final_value = self.read_memory(final_memory_location);
-        self.registers[instruction.destination_register as usize] = final_value;
+
+        self.registers[instruction.destination_register] = final_value;
         self.set_condition_flag(final_value)
     }
 
     fn store_indirect(mut self, instruction: instructions::OpSti) -> Self {
-        let registry_contents = self.registers[instruction.registry_to_store as usize];
-        let program_counter = self.registers[registers::Register::RPc as usize] as i16;
+        let registry_contents = self.registers[instruction.registry_to_store];
+        let program_counter = self.program_counter();
         let program_counter_offset = instruction.program_counter_offset;
-        let memory_location = self.read_memory((program_counter + program_counter_offset) as u16) as u16;
+        let memory_location = self.read_memory((program_counter + program_counter_offset).into());
 
-        self.set_memory(memory_location, registry_contents);
+        self.set_memory(Address::from(memory_location), registry_contents);
         self
     }
 
     fn jump(mut self, instruction: instructions::OpJmp) -> Self {
-        let register = instruction.jump_to_contents_of_register as usize;
+        let register = instruction.jump_to_contents_of_register;
         let register_value = self.registers[register];
 
-        self.registers[registers::Register::RPc as usize] = register_value;
+        self.registers[registers::Register::RPc] = register_value;
         self
     }
 
     fn load_effective_address(mut self, instruction: instructions::OpLea) -> Self {
-        let destination_registry = instruction.destination_register as usize;
+        let destination_registry = instruction.destination_register;
         let program_counter_offset = instruction.program_counter_offset;
-        let program_counter = self.registers[registers::Register::RPc as usize];
-        let new_program_counter = program_counter as i16 + program_counter_offset;
+        let program_counter = self.program_counter();
+        let new_program_counter = program_counter + program_counter_offset;
 
-        self.registers[destination_registry] = new_program_counter as u16;
-        self.set_condition_flag(instructions::convert_to_unsigned(new_program_counter))
+        self.registers[destination_registry] = new_program_counter.into();
+        self.set_condition_flag(new_program_counter.into())
     }
 
     fn trap(self, instruction: instructions::TrapCode) -> Self {
@@ -273,15 +287,16 @@ impl Cpu {
     }
 
     fn trap_puts(self) -> Self {
-        let memory_address = self.registers[registers::Register::R0 as usize];
+        let memory_address = Address::from(self.registers[registers::Register::R0]);
         let string_to_print = self.extract_string_from_memory_location(memory_address);
-        
+
         print!("{}", string_to_print);
         self
     }
 
     fn extract_string_from_memory_location(&self, memory_location: Address) -> String {
-        let array_slice = &self.memory[memory_location as usize..];
+        let memory_location_value = usize::from(memory_location);
+        let array_slice = &self.memory[memory_location_value..];
 
         array_slice
             .into_iter()
@@ -293,26 +308,26 @@ impl Cpu {
 
     fn trap_get_char(mut self) -> Self {
         let character = std::io::stdin().bytes().next().unwrap().unwrap();
-        self.registers[registers::Register::R0 as usize] = character.into();
+        self.registers[registers::Register::R0] = character.into();
         self
     }
 
     fn trap_input(mut self) -> Self {
         println!("Enter a character: ");
         let character = std::io::stdin().bytes().next().unwrap().unwrap();
-        self.registers[registers::Register::R0 as usize] = character.into();
+        self.registers[registers::Register::R0] = character.into();
         self
     }
 
     fn trap_out_char(self) -> Self {
-        let character = (self.registers[registers::Register::R0 as usize] as u8) as char;
+        let character = (self.registers[registers::Register::R0] as u8) as char;
         print!("{}", character);
         self
     }
 
     fn set_condition_flag(mut self, value: u16) -> Self {
         let condition_flag = calculate_condition_flag(value);
-        self.registers[registers::Register::RCond as usize] = condition_flag.bits();
+        self.registers[registers::Register::RCond] = condition_flag.bits();
         self
     }
 }
