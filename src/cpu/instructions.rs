@@ -5,25 +5,6 @@ use std::ops::{Add, Index, IndexMut};
 #[derive(Debug, Copy, Clone)]
 pub struct Address(usize);
 
-#[derive(Debug, Copy, Clone)]
-pub struct BinaryInstruction(u16);
-
-#[derive(Debug, Copy, Clone)]
-pub struct MemoryOffset(i16);
-
-#[derive(Debug, Copy, Clone)]
-pub struct ProgramCounter(u16);
-
-#[derive(Debug, Copy, Clone)]
-pub struct ProgramCounterOffset(i16);
-
-impl From<i16> for ProgramCounterOffset {
-    fn from(value: i16) -> ProgramCounterOffset {
-        let program_counter_value = value + 1;
-        ProgramCounterOffset(program_counter_value)
-    }
-}
-
 impl From<u16> for Address {
     fn from(value: u16) -> Self {
         Address(value as usize)
@@ -54,6 +35,56 @@ impl From<ProgramCounter> for Address {
     }
 }
 
+impl Index<Address> for Vec<u16> {
+    type Output = u16;
+
+    fn index(&self, address: Address) -> &u16 {
+        let index = address.0 as usize;
+        &self[index]
+    }
+}
+
+impl IndexMut<Address> for Vec<u16> {
+    fn index_mut(&mut self, address: Address) -> &mut u16 {
+        let index = address.0 as usize;
+        &mut self[index]
+    }
+}
+
+
+#[derive(Debug, Copy, Clone)]
+pub struct BinaryInstruction(u16);
+
+impl BinaryInstruction {
+    fn op_code(self) -> OpCode {
+        let BinaryInstruction(op_code) = self;
+        let last_four_bits = op_code >> 12;
+        
+        match OpCode::from_u16(last_four_bits) {
+            Some(op_code) => op_code,
+            None => panic!("Unsupported opcode")
+        }
+    }
+}
+
+impl From<u16> for BinaryInstruction {
+    fn from(binary_instruction: u16) -> Self {
+        BinaryInstruction(binary_instruction)
+    }
+}
+
+impl From<BinaryInstruction> for u16 {
+    fn from(binary_instruction: BinaryInstruction) -> Self {
+        binary_instruction.0
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct MemoryOffset(i16);
+
+#[derive(Debug, Copy, Clone)]
+pub struct ProgramCounter(u16);
+
 impl Add<ProgramCounterOffset> for ProgramCounter {
     type Output = ProgramCounter;
 
@@ -78,38 +109,14 @@ impl From<ProgramCounter> for u16 {
     }
 }
 
-impl Index<Address> for Vec<u16> {
-    type Output = u16;
 
-    fn index(&self, address: Address) -> &u16 {
-        let index = address.0 as usize;
-        &self[index]
-    }
-}
+#[derive(Debug, Copy, Clone)]
+pub struct ProgramCounterOffset(i16);
 
-impl IndexMut<Address> for Vec<u16> {
-    fn index_mut(&mut self, address: Address) -> &mut u16 {
-        let index = address.0 as usize;
-        &mut self[index]
-    }
-}
-
-impl BinaryInstruction {
-    fn op_code(self) -> u16 {
-        let BinaryInstruction(op_code) = self;
-        op_code >> 12
-    }
-}
-
-impl From<u16> for BinaryInstruction {
-    fn from(binary_instruction: u16) -> Self {
-        BinaryInstruction(binary_instruction)
-    }
-}
-
-impl From<BinaryInstruction> for u16 {
-    fn from(binary_instruction: BinaryInstruction) -> Self {
-        binary_instruction.0
+impl From<i16> for ProgramCounterOffset {
+    fn from(value: i16) -> ProgramCounterOffset {
+        let program_counter_value = value;
+        ProgramCounterOffset(program_counter_value)
     }
 }
 
@@ -119,6 +126,26 @@ bitflags! {
         const Zero = 0b00000010;
         const Negative = 0b00000100;
     }
+}
+
+#[derive(FromPrimitive)]
+enum OpCode {
+    Br = 0b0000,
+    Add = 0b0001,
+    And = 0b0101,
+    Ldi = 0b1010,
+    Not = 0b1001,
+    Jmp = 0b1100,
+    Jsr = 0b0100,
+    Load = 0b0010,
+    Ldr = 0b0110,
+    Lea = 0b1110,
+    St = 0b0011,
+    Sti = 0b1011,
+    Str = 0b0111,
+    Trap = 0b1111,
+    Rti = 0b1000,
+    Res = 0b1101
 }
 
 pub enum Instruction {
@@ -143,23 +170,22 @@ pub enum Instruction {
 impl From<BinaryInstruction> for Instruction {
     fn from(binary_instruction: BinaryInstruction) -> Self {
         match binary_instruction.op_code() {
-            0b0000 => Instruction::OpBr(binary_instruction.into()),
-            0b0001 => Instruction::OpAdd(binary_instruction.into()),
-            0b0101 => Instruction::OpAnd(binary_instruction.into()),
-            0b1010 => Instruction::OpLdi(binary_instruction.into()),
-            0b1001 => Instruction::OpNot(binary_instruction.into()),
-            0b1100 => Instruction::OpJmp(binary_instruction.into()),
-            0b0100 => Instruction::OpJsr(binary_instruction.into()),
-            0b0010 => Instruction::OpLoad(binary_instruction.into()),
-            0b0110 => Instruction::OpLdr(binary_instruction.into()),
-            0b1110 => Instruction::OpLea(binary_instruction.into()),
-            0b0011 => Instruction::OpSt(binary_instruction.into()),
-            0b1011 => Instruction::OpSti(binary_instruction.into()),
-            0b0111 => Instruction::OpStr(binary_instruction.into()),
-            0b1111 => Instruction::OpTrap(binary_instruction.into()),
-            0b1000 => Instruction::OpRti(),
-            0b1101 => Instruction::OpRes(),
-            _ => panic!("Unsupported op code"),
+            OpCode::Br => Instruction::OpBr(binary_instruction.into()),
+            OpCode::Add => Instruction::OpAdd(binary_instruction.into()),
+            OpCode::And => Instruction::OpAnd(binary_instruction.into()),
+            OpCode::Ldi => Instruction::OpLdi(binary_instruction.into()),
+            OpCode::Not => Instruction::OpNot(binary_instruction.into()),
+            OpCode::Jmp => Instruction::OpJmp(binary_instruction.into()),
+            OpCode::Jsr => Instruction::OpJsr(binary_instruction.into()),
+            OpCode::Load => Instruction::OpLoad(binary_instruction.into()),
+            OpCode::Ldr => Instruction::OpLdr(binary_instruction.into()),
+            OpCode::Lea => Instruction::OpLea(binary_instruction.into()),
+            OpCode::St => Instruction::OpSt(binary_instruction.into()),
+            OpCode::Sti => Instruction::OpSti(binary_instruction.into()),
+            OpCode::Str => Instruction::OpStr(binary_instruction.into()),
+            OpCode::Trap => Instruction::OpTrap(binary_instruction.into()),
+            OpCode::Rti => Instruction::OpRti(),
+            OpCode::Res => Instruction::OpRes(),
         }
     }
 }
