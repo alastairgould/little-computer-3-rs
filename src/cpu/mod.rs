@@ -112,21 +112,21 @@ impl Cpu {
     fn add_normal(mut self, instruction: instructions::OpAddNormal) -> Self {
         let first_value_bits = self.registers[instruction.first_value_register];
         let first_value = instructions::convert_to_signed(first_value_bits);
-        let second_value =
-            instructions::convert_to_signed(self.registers[instruction.second_value_register]);
-        let value = first_value.wrapping_add(second_value);
-        let unsigned_value = instructions::convert_to_unsigned(value);
-
+        let second_value = instructions::convert_to_signed(self.registers[instruction.second_value_register]);
+        
+        let result = first_value.wrapping_add(second_value);
+       
+        let unsigned_value = instructions::convert_to_unsigned(result);
         self.registers[instruction.destination_register] = unsigned_value;
         self.set_condition_flag(unsigned_value)
     }
 
     fn add_immediate(mut self, instruction: instructions::OpAddImmediate) -> Self {
-        let first_value =
-            instructions::convert_to_signed(self.registers[instruction.first_value_register]);
-        let value = first_value.wrapping_add(instruction.second_value);
-        let unsigned_value = instructions::convert_to_unsigned(value);
+        let first_value = instructions::convert_to_signed(self.registers[instruction.first_value_register]);
+        
+        let result = first_value.wrapping_add(instruction.second_value);
 
+        let unsigned_value = instructions::convert_to_unsigned(result);
         self.registers[instruction.destination_register] = unsigned_value;
         self.set_condition_flag(unsigned_value)
     }
