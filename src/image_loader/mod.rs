@@ -3,7 +3,7 @@ use std::io::Read;
 
 mod parser;
 
-pub fn load_image(path: &String) -> Vec<u16> {
+pub fn load_image(path: &str) -> Vec<u16> {
     let mut file = File::open(path).unwrap();
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).unwrap();
